@@ -1,0 +1,124 @@
+#!/bin/sh
+
+# Configure locations of PAM files.  Note, pamconf must end with a slash
+setconf pamlib /system/lib/dll/pam
+setconf pamconf /system/etc/pam/
+
+# local/snippets/post_start.custom
+# Commands executed from post_startup.sh. Executed at the end of system startup whether slm is in use
+# or not
+#
+# To allow resource managers to be run properly with and without security policies, command lines
+# should be written in one of the following forms:
+#
+#     START(resmgr_t) resmgr DROPROOT(resmgr_uid)
+#     STARTU(resmgr_t, resmgr_uid) resmgr
+# Where resmgr_t is the security type name (arbitrary but usually the name of the resmgr with _t appended),
+# and resmgr_uid is the id to use for both uid and gid.  DROPROOT is used only in cases where the
+# resource manager supports a -U option for switching to non-root.
+
+. /boot/qnx_config.txt
+echo '---> Starting USB...'
+/proc/boot/usb_start.sh
+# devb-umass mem name=below1G blk memory=below1G cam pnp
+usblauncher_otg -0 -l
+
+ip6addrctl install /system/etc/ip6addrctl.conf
+
+echo '---> Starting Screen...'
+io-hid -dusb
+waitfor /dev/io-hid/io-hid
+chown 36 /dev/io-hid/io-hid
+screen -u 36:36 -c /system/lib/graphics/rpi4-drm/graphics-rpi4.conf >/dev/null 2>&1
+echo drop_privileges > /dev/screen/command
+waitfor /dev/screen/
+
+echo '---> Starting I2C bus...'
+i2c-bcm2711 -p0xfe205000 --b100000 --u0
+waitfor /dev/i2c0
+i2c-bcm2711 -p0xfe804000 --b100000 --u1
+waitfor /dev/i2c1
+
+echo "---> Starting SPI master driver ..."
+on -u 0:524 spi-bcm2711 -c /system/etc/config/spi/spi.conf
+waitfor /dev/io-spi
+
+echo '---> Starting RPi drivers...'
+rpi_mbox -U 523:523 &
+waitfor /dev/mailbox
+
+rpi_gpio -u 522:522 &
+waitfor /dev/gpio
+
+rpi_thermal &
+waitfor /dev/thermal
+
+setconf _CS_HOSTNAME $HOSTNAME
+if ! slay -p mdnsd >/dev/null 2>&1; then
+  # mdnsd has already been started, probably with the wrong hostname.
+  # Slay it and dns-sd - then restart them to get the correct hostname
+  slay dns-sd mdnsd
+  mdnsd
+  on -d -u 50:50  dns-sd -R "XYZ" _airplay._tcp local 500x >/dev/null
+elif [ ! -z "$IP" ]; then
+  # Using a static IP so dhcp won't automatically start mdnsd for us
+  mdnsd
+  on -d -u 50:50  dns-sd -R "XYZ" _airplay._tcp local 500x >/dev/null
+fi
+
+# Set GPIO  for CSI2 cameras
+gpio-bcm2711 set 44 a1 # Set pin 44 to SDA0
+gpio-bcm2711 set 45 a1 # Set pin 45 to SCL0
+
+gpio-bcm2711 set 0 ip pd # Pull down pin 0
+gpio-bcm2711 set 1 ip pd # Pull down pin 1
+
+# Start VCHIQ and VCSM modules for ISP debayering
+bcm-rpi4-vchiq &
+waitfor /dev/vchiq
+bcm-rpi4-vcsm &
+waitfor /dev/vcsm
+
+if [ -d /dev/screen ]; then
+    echo '---> Starting touch drivers...'
+    mtouch -c /system/etc/system/config/mtouch.conf -r
+
+    echo '---> Starting Sensor...'
+    # There can only be 1 instance of sensor simultaneously.
+    # Only 1 of the sensor commands below must be uncommented.
+
+    # Camera Module 3
+    sensor -U 521:521,1001 -b external -r /system/share/sensor -c /system/etc/system/config/camera_module3.conf
+
+    # Camera Module 3 bayer data - only works with rpi4-isp-debayer-example
+    #sensor -U 521:521,1001 -b external -r /system/share/sensor -c /system/etc/system/config/camera_module3_bayer.conf
+
+    # USB camera
+    #sensor -U 521:521,1001 -r /system/share/sensor -c /system/etc/system/config/usb_camera.conf
+
+    # USB3 vision camera
+    #sensor -U 521:521,1001 -b external -r /system/share/sensor -c /system/etc/system/config/u3v_camera.conf
+
+    # Simulator camera i.e. color bars
+    #sensor -U 521:521,1001 -r /system/share/sensor -c /system/etc/system/config/sensor_demo.conf
+
+    waitfor /dev/sensor/camera1
+
+    echo '---> Starting Window Manager...'
+    echo "Using Full Screen Window Manager..."
+    fullscreen-winmgr &
+    demolauncher -a /system/etc/desktop_files &
+else
+    echo ""
+    echo "*** Failed to launch screen. No graphics contents will be available. ***"
+    echo ""
+fi
+
+cat /data/var/etc/qnx800_rpi4_welcome_msg.txt
+
+if [ ! -z "${IP}" ]; then
+    pinger
+fi
+echo Process count:`pidin arg | wc -l`
+
+exit 0

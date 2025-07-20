@@ -1,0 +1,37 @@
+# Core Computer Vision & Image Processing
+opencv-python
+numpy
+
+# AI/ML Integration
+twelvelabs
+requests
+
+# Environment & Configuration
+python-dotenv
+
+# Video Processing & Codecs
+imageio
+imageio-ffmpeg
+
+# File Handling & Compression
+zipfile36
+
+# System Monitoring & Logging
+psutil
+
+# Date/Time Handling
+python-dateutil
+
+# JSON/Data Processing
+jsonschema
+
+# HTTP/API Utilities
+urllib3
+certifi
+
+# Threading & Async Support
+# Path/File Utilities
+pathlib2
+
+google-generativeai
+opencv-python
